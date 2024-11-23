@@ -1,0 +1,56 @@
+name: Test Action
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  ORG_NAME: eggplants
+  PACKAGE_NAME: ghcr-badge
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Test - found
+        id: test
+        uses: ./
+        with:
+          org: "${{ env.ORG_NAME }}"
+          package: "${{ env.PACKAGE_NAME }}"
+          tag: latest
+          fail-if-not-found: false
+
+      - name: Check outputs (found)
+        run: |
+          echo "Found: ${{ steps.test.outputs.found }}"
+          if [ "${{ steps.test.outputs.found }}" = "true" ]; then
+            echo "URL: ${{ steps.test.outputs.package-url }}"
+            echo "Version ID: ${{ steps.test.outputs.version-id }}"
+            echo "Created at: ${{ steps.test.outputs.created-at }}"
+          else
+            exit 1
+          fi
+      
+      - name: Test - not found
+        id: test
+        uses: ./
+        with:
+          org: "${{ env.ORG_NAME }}"
+          package: "${{ env.PACKAGE_NAME }}"
+          tag: notexist
+          fail-if-not-found: false
+
+      - name: Check outputs (not found)
+        run: |
+          echo "Found: ${{ steps.test.outputs.found }}"
+          if [ "${{ steps.test.outputs.found }}" != "true" ]; then
+            echo "URL: ${{ steps.test.outputs.package-url }}"
+            echo "Version ID: ${{ steps.test.outputs.version-id }}"
+            echo "Created at: ${{ steps.test.outputs.created-at }}"
+          else
+            exit 1
+          fi
