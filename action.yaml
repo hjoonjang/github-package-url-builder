@@ -1,0 +1,103 @@
+name: 'Package URL Builder'
+description: 'Builds a GitHub package URL with a specific tag from a GitHub package'
+branding:
+  icon: 'link'  # Choose from: https://feathericons.com/
+  color: 'blue' # Options: white, yellow, blue, green, orange, red, purple, gray-dark
+
+inputs:
+  org:
+    description: 'GitHub organization name'
+    required: true
+  package:
+    description: 'Package name'
+    required: true
+  tag:
+    description: 'Specific tag to search for'
+    required: true
+  fail-if-not-found:
+    description: 'Fail workflow if tag is not found'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token for API authentication'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  package-url:
+    description: 'The constructed package URL with tag'
+  version-id:
+    description: 'The version ID of the found package'
+  created-at:
+    description: 'Creation timestamp of the package version'
+  found:
+    description: 'Boolean indicating if the tag was found'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Get package info and build URL
+      id: get-url
+      shell: bash
+      run: |
+        # TODO: Resolve package owned by user (not by org)
+
+        # Fetch package info from GitHub API
+        echo "Fetching package versions for ${{ inputs.org }}/${{ inputs.package }}..."
+        response=$(curl -s -w "%{http_code}" \
+          -H "Authorization: Bearer ${{ inputs.github-token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/orgs/${{ inputs.org }}/packages/container/${{ inputs.package }}/versions")
+        
+        # Get HTTP status code and body
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | sed '$d')
+        
+        # Check if request was successful
+        if [ "$http_code" -ne 200 ]; then
+          echo "::error::API request failed with status $http_code"
+          echo "Response: $body"
+          exit 1
+        fi
+        
+        # TODO: Resolve paginated response -> the tag might be located out of the first page
+
+        # Extract package info using jq
+        package_info=$(echo "$body" | jq -r --arg TAG "${{ inputs.tag }}" '
+          map(select(.metadata.container.tags[] == $TAG))[0] |
+          if . then
+            {
+              url: .html_url + "?tag=" + $TAG,
+              id: .id,
+              created_at: .created_at,
+              found: true
+            }
+          else
+            {
+              url: "",
+              id: "",
+              created_at: "",
+              found: false
+            }
+          end | tojson
+        ')
+        
+        found=$(echo "$package_info" | jq -r '.found')
+        url=$(echo "$package_info" | jq -r '.url')
+        id=$(echo "$package_info" | jq -r '.id')
+        created_at=$(echo "$package_info" | jq -r '.created_at')
+        
+        if [ "$found" = "true" ]; then
+          echo "Found package version with tag '${{ inputs.tag }}'"
+          echo "package-url=$url" >> $GITHUB_OUTPUT
+          echo "version-id=$id" >> $GITHUB_OUTPUT
+          echo "created-at=$created_at" >> $GITHUB_OUTPUT
+          echo "found=true" >> $GITHUB_OUTPUT
+        else
+          echo "::warning::Tag '${{ inputs.tag }}' not found in package versions"
+          echo "found=false" >> $GITHUB_OUTPUT
+          
+          if [ "${{ inputs.fail-if-not-found }}" = "true" ]; then
+            exit 1
+          fi
+        fi
